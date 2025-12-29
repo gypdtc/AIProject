@@ -45,7 +45,7 @@ def run_test():
         print(f"✅ 成功读取 GEMINI_API_KEY (前4位): {api_key[:4]}...")
         try:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             response = model.generate_content("Hello, this is a cloud deployment test. Reply with 'Success'!")
             print(f"✅ Gemini AI 测试成功: {response.text.strip()}")
         except Exception as e:
