@@ -32,8 +32,7 @@ jobs:
 
     - name: Deploy to Cloud Run
       run: |
-        gcloud run services update stock-scanner-service \
+        gcloud run jobs deploy stock-scanner-job \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
           --region ${{ env.REGION }} \
-          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
-          --port 8080 # 这一行虽然写了，但我们需要在代码里加一个简单的 HTTP 服务，或者忽略报错
+          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},REDDIT_CLIENT_ID=${{ secrets.REDDIT_CLIENT_ID }},REDDIT_CLIENT_SECRET=${{ secrets.REDDIT_CLIENT_SECRET }}"
