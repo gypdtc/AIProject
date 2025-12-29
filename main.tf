@@ -44,3 +44,28 @@ resource "google_cloud_run_v2_job" "stock_scanner_job" {
   }
 }
 
+# 创建定时触发器
+resource "google_cloud_scheduler_job" "stock_scanner_scheduler" {
+  name             = "reddit-stock-scanner-hourly"
+  description      = "Every hour, trigger the stock scanner AI job"
+  schedule         = "0 * * * *"        # 每小时运行一次
+  time_zone        = "Asia/Shanghai"    # 设置时区
+  attempt_deadline = "320s"
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "POST"
+    # 这里动态获取你定义的 Cloud Run Job 的执行 URL
+    uri         = "https://${google_cloud_run_v2_job.stock_scanner_job.location}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${google_cloud_run_v2_job.stock_scanner_job.project}/jobs/${google_cloud_run_v2_job.stock_scanner_job.name}:run"
+
+    oauth_token {
+      service_account_email = data.google_compute_default_service_account.default.email
+    }
+  }
+}
+
+# 获取默认的服务账号，用于授权调度器运行 Job
+data "google_compute_default_service_account" "default" {}
