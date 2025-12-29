@@ -17,5 +17,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制所有代码到镜像中
 COPY . .
 
-# 默认运行命令（我们可以通过环境变量控制运行哪个脚本）
-CMD ["python", "mocktest.py"]
+# 修改运行命令：运行 Python 后睡眠 60 秒，防止 Cloud Run 立即判定为失败
+CMD python mocktest.py && sleep 60
