@@ -56,6 +56,25 @@ resource "google_cloud_run_v2_service_iam_member" "noauth" {
   member   = "allUsers"
 }
 
-output "service_url" {
-  value = google_cloud_run_v2_service.stock_service.uri
+
+resource "google_cloud_run_v2_job" "analyst_job" {
+  name     = "stock-analyst-job"
+  location = "us-central1"
+
+  template {
+    template {
+      containers {
+        image = "us-central1-docker.pkg.dev/gen-lang-client-0486815668/stock-scanner-repo/app:latest"
+        # 重点：运行这个特定的分析脚本，而不是 main.py
+        command = ["python", "analyst_job.py"] 
+        env {
+          name  = "DATABASE_URL"
+          value = "你的_DATABASE_URL"
+        }
+      }
+    }
+  }
 }
+
+
+
