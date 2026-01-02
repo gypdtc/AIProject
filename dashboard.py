@@ -49,21 +49,53 @@ if st.sidebar.button('刷新数据'):
 
 # --- Reddit ---
 st.divider()
-st.header("🐋 Whale Flow 高质量期权异动 (6步量化协议)")
-st.caption("基于昨日收盘数据、20日均线趋势、IV估值及 Gemini 叙事检查")
-query_options = "SELECT * FROM option_trades ORDER BY final_score DESC LIMIT 5"
-df_options = get_data(query_options)
+st.set_page_config(page_title="AI 鲸鱼期权追踪", layout="wide")
+st.title("🐋 Whale Flow AI 智能期权看板")
+# 获取最近的建议
+df = get_data("SELECT * FROM option_trades ORDER BY created_at DESC LIMIT 10")
 
-if not df_options.empty:
-    for _, row in df_options.iterrows():
-        with st.expander(f"🎯 {row['ticker']} - 综合评分: {row['final_score']}"):
-            col1, col2, col3 = st.columns(3)
-            col1.metric("叙事类型", row['narrative_type'])
-            col2.metric("情感分", row['sentiment_score'])
-            col3.metric("盈亏比", f"{row['risk_reward_ratio']}x")
-            st.write(f"建议策略：买入代码 {row['ticker']}， strike 调整至当前价 2% 以内，到期日延长 14 天。")
+if not df.empty:
+    for index, row in df.iterrows():
+        # 根据方向显示不同颜色
+        color = "#2ecc71" if row['side'] == 'CALL' else "#e74c3c"
+        label = "📈 看涨 (CALL)" if row['side'] == 'CALL' else "📉 看跌 (PUT)"
+        
+        with st.container():
+            st.markdown(f"---")
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                st.subheader(f"{row['ticker']}")
+                st.markdown(f"<h3 style='color:{color};'>{label}</h3>", unsafe_allow_html=True)
+                st.write(f"**入场标价:** ${row['entry_stock_price']}")
+                st.write(f"**建议行权:** ${row['suggested_strike']}")
+                st.write(f"**评分:** {row['final_score']:.1f}/10")
+                st.info(f"**AI 叙事:**\n\n{row['narrative_type']}") # 自动换行
+
+            with col2:
+                # 绘制收益期望图
+                entry = float(row['entry_stock_price'])
+                # 模拟价格波动范围 -5% 到 +10%
+                x_prices = [entry * (1 + i/100) for i in range(-5, 11)]
+                # 简单的期权收益模拟公式 (杠杆约为 10 倍)
+                if row['side'] == 'CALL':
+                    y_pnl = [(max(p - entry, -entry*0.05)) * 10 for p in x_prices]
+                else:
+                    y_pnl = [(max(entry - p, -entry*0.05)) * 10 for p in x_prices]
+                
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=x_prices, y=y_pnl, fill='tozeroy', 
+                                         line=dict(color=color), name="预期收益"))
+                fig.update_layout(
+                    title=f"{row['ticker']} 持有至明天的预期 P&L (%)",
+                    xaxis_title="标的价格 (Stock Price)",
+                    yaxis_title="预期盈亏 ($)",
+                    height=300,
+                    template="plotly_dark"
+                )
+                st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("尚未发现符合 6 步过滤协议的期权机会。")
+    st.write("暂无扫描数据，请运行 Scanner Job。")
 
 # --- 第一部分：今日热门股票统计 ---
 st.divider()
