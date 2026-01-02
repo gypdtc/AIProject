@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 import os
 import plotly.express as px
+import plotly.graph_objects as go
 
 # --- 1. 密码保护逻辑 ---
 def check_password():
