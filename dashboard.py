@@ -4,6 +4,30 @@ import psycopg2
 import os
 import plotly.express as px
 
+# --- 1. 密码保护逻辑 ---
+def check_password():
+    """如果返回 True，则表示密码正确"""
+    
+    # 从环境变量读取密码，如果没有设置，默认一个极难猜到的值
+    target_password = os.getenv("DASHBOARD_PASSWORD", "Admin123") 
+
+    if "password_correct" not in st.session_state:
+        st.title("🔒 访问受限")
+        password = st.text_input("请输入访问密码", type="password")
+        if st.button("登录"):
+            if password == target_password:
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("🚫 密码错误")
+        return False
+    return True
+
+# 只有校验通过才执行后面的代码
+if not check_password():
+    st.stop() # 密码不对就停止运行后续 UI
+
+# --- 后面才是你原来的看板代码 ---
 # 1. 配置页面
 st.set_page_config(page_title="AI 股票情绪监控看板", layout="wide")
 st.title("📈 AI 股票情绪与“股神”追踪看板")
