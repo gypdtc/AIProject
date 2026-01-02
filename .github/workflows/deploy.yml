@@ -66,4 +66,4 @@ jobs:
         gcloud run jobs update ${{ env.JOB_NAME }} \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
           --region ${{ env.REGION }} \
-          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}"
