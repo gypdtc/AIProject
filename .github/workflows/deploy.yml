@@ -30,9 +30,9 @@ jobs:
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
 
-    - name: Deploy to Cloud Run
+   - name: Deploy to Cloud Run Service
       run: |
-        gcloud run jobs deploy stock-scanner-job \
-          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
-          --region ${{ env.REGION }} \
-          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},REDDIT_CLIENT_ID=${{ secrets.REDDIT_CLIENT_ID }},REDDIT_CLIENT_SECRET=${{ secrets.REDDIT_CLIENT_SECRET }}"
+        gcloud run services update stock-scanner-service \
+        --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
+        --region ${{ env.REGION }} \
+        --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"

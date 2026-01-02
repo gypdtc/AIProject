@@ -1,4 +1,5 @@
 .env
+local.txt
 *.tfstate
 *.tfstate.backup
 .terraform/

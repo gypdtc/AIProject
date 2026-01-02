@@ -1,81 +1,49 @@
 import os
-import praw
+import base64
+import io
 import psycopg2
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
-from datetime import datetime
+from PIL import Image
 
-# 1. 配置环境（从云端环境变量读取）
+app = FastAPI()
+
+# 允许 Chrome 插件跨域请求
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 配置环境
 DATABASE_URL = os.getenv("DATABASE_URL")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# 如果你使用了 Reddit API，请在 GitHub Secrets 添加这些值
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-def get_reddit_trends():
-    """从 Reddit 抓取热门讨论"""
-    print("正在连接 Reddit...")
-    reddit = praw.Reddit(
-        client_id=REDDIT_CLIENT_ID,
-        client_secret=REDDIT_CLIENT_SECRET,
-        user_agent="StockScanner v1.0"
-    )
-    # 监控 wallstreetbets 频道
-    posts = reddit.subreddit("wallstreetbets").hot(limit=10)
-    data = []
-    for post in posts:
-        data.append(f"Title: {post.title}\nContent: {post.selftext[:200]}")
-    return "\n---\n".join(data)
-
-def analyze_with_gemini(text):
-    """使用 Gemini AI 分析股票倾向"""
-    print("正在调用 Gemini AI 分析内容...")
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    prompt = f"""
-    从以下文本中提取提到的股票代码（Ticker）和市场情绪（Bullish/Bearish/Neutral）。
-    请仅以以下格式返回：TICKER:SENTIMENT
-    例如：AAPL:Bullish, TSLA:Bearish
-    文本内容：{text}
-    """
-    response = model.generate_content(prompt)
-    return response.text.strip()
-
-def save_to_db(results):
-    """将结果存入 Neon 数据库"""
-    print(f"正在保存结果到数据库: {results}")
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor()
-    
-    # 确保表存在
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS stock_trends (
-            id SERIAL PRIMARY KEY,
-            ticker VARCHAR(10),
-            sentiment VARCHAR(20),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # 解析并插入数据
-    pairs = results.split(",")
-    for pair in pairs:
-        if ":" in pair:
-            ticker, sentiment = pair.split(":")
-            cur.execute(
-                "INSERT INTO stock_trends (ticker, sentiment) VALUES (%s, %s)",
-                (ticker.strip(), sentiment.strip())
-            )
-    
-    conn.commit()
-    cur.close()
-    conn.close()
-    print("✅ 任务完成！数据已同步到云端数据库。")
+@app.post("/analyze")
+async def analyze_route(request: Request):
+    try:
+        data = await request.json()
+        # 1. 解码图片
+        image_bytes = base64.b64decode(data['image'].split(',')[1])
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        # 2. 调用 Gemini 多模态模型
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = "分析这张截图中的股票讨论。提取 Ticker:Sentiment 格式。只返回 JSON，例如 {'AAPL': 'Bullish', 'TSLA': 'Bearish'}"
+        response = model.generate_content([prompt, img])
+        
+        # 3. 存入 Neon 数据库
+        analysis = response.text.replace("'", '"') # 简单清洗
+        # ... (此处复用你之前的数据库插入代码 save_to_db)
+        
+        return {"status": "success", "result": analysis}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    try:
-        raw_text = get_reddit_trends()
-        analysis = analyze_with_gemini(raw_text)
-        save_to_db(analysis)
-    except Exception as e:
-        print(f"❌ 运行出错: {e}")
+    import uvicorn
+    # Cloud Run 会自动提供 PORT 环境变量
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
