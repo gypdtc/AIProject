@@ -3,14 +3,14 @@ import base64
 import io
 import json
 import psycopg2
-from fastapi import FastAPI, Request, Header, HTTPException
+from datetime import datetime
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from PIL import Image
 
 app = FastAPI()
 
-# 允许跨域
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,96 +18,96 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 配置区 ---
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# 设置一个只有你插件知道的密钥
 INTERNAL_AUTH_KEY = os.getenv("INTERNAL_AUTH_KEY")
-
 genai.configure(api_key=GEMINI_API_KEY)
-# 使用 2.0 版本
-GEMINI_MODEL_NAME = "gemini-2.5-flash" 
+GEMINI_MODEL_NAME = "gemini-2.5-flash"
 
-def save_to_db(ticker, sentiment, reason):
-    """将结果持久化到 Neon 数据库，带有详细日志"""
+def save_to_db(ticker, sentiment, author, post_time, reason):
+    """增强版入库函数：支持发帖人和发帖时间"""
     conn = None
     try:
-        print(f"尝试连接数据库...")
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
-        sql = "INSERT INTO stock_trends (ticker, sentiment, reason, source) VALUES (%s, %s, %s, %s)"
-        params = (ticker.upper(), sentiment.capitalize(), reason, "ChromeExtension")
+        # 即使 Ticker 相同，只要 Author 或 Post_Time 不同，就是新的有效记录
+        sql = """
+        INSERT INTO stock_trends (ticker, sentiment, author, post_time, reason, source) 
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            ticker.upper(), 
+            sentiment.capitalize(), 
+            author, 
+            post_time, 
+            reason, 
+            "ChromeExtension"
+        )
         
-        print(f"正在执行 SQL: {sql} 参数: {params}")
         cur.execute(sql, params)
-        
         conn.commit()
         cur.close()
-        print(f"✅ 数据库写入成功: {ticker}")
+        print(f"✅ 已记录: {author} 发布的 {ticker} ({sentiment})")
     except Exception as e:
-        print(f"❌ 数据库写入过程中出错: {str(e)}")
-        # 抛出异常以便在外层捕获
-        raise e
+        print(f"❌ 数据库写入失败: {e}")
     finally:
         if conn:
             conn.close()
 
 @app.post("/analyze")
 async def analyze_route(request: Request):
-    # 安全校验：检查 Header 是否包含正确的 Key
     auth_key = request.headers.get("X-Internal-Key")
-    print(f"收到请求，校验 Key...")
-    
-    if auth_key != INTERNAL_AUTH_KEY:
-        print(f"⚠️ 未授权的访问尝试！Key 不匹配。")
+    if not INTERNAL_AUTH_KEY or auth_key != INTERNAL_AUTH_KEY:
         return {"status": "error", "message": "Unauthorized"}
 
     try:
-        print("1. 正在解析请求 JSON...")
         data = await request.json()
-        image_data = data.get('image')
-        
-        if not image_data:
-            print("❌ 请求中没有图片数据")
-            return {"status": "error", "message": "No image"}
-
-        print("2. 正在解码 Base64 图片...")
-        image_bytes = base64.b64decode(image_data.split(',')[1])
+        image_bytes = base64.b64decode(data['image'].split(',')[1])
         img = Image.open(io.BytesIO(image_bytes))
-        print(f"📷 图片加载成功，尺寸: {img.size}")
+
+        # 获取当前时间传给 AI，方便它计算“3小时前”的具体日期
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"--- 开始 AI 分析 (当前参考时间: {now_str}) ---")
         
-        print(f"3. 正在调用 AI 模型 ({GEMINI_MODEL_NAME})...")
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        prompt = """
-        分析这张截图中的股票讨论。
-        提取股票代码和情绪（Bullish/Bearish/Neutral）。
-        严格以 JSON 格式返回，例如: {"AAPL": "Bullish"}
-        不要包含 ```json 等标记，只要纯 JSON 文本。
+        prompt = f"""
+        你是一个专业的社交媒体数据抓取助手。
+        当前系统参考时间是: {now_str}。
+        
+        任务：分析这张 Reddit 或小红书的截图，提取以下信息：
+        1. 提及的股票代码 (ticker)
+        2. 情绪 (sentiment: Bullish/Bearish/Neutral)
+        3. 发帖人用户名 (author: 如果找不到则填 Unknown)
+        4. 原始发帖时间 (post_time: 如果是'2h ago'请计算出具体时间，格式 YYYY-MM-DD HH:MM:SS)
+        
+        请严格返回 JSON 数组，例如:
+        [
+          {{"ticker": "NVDA", "sentiment": "Bullish", "author": "UserA", "post_time": "2026-01-01 18:00:00"}},
+          {{"ticker": "AAPL", "sentiment": "Bearish", "author": "UserB", "post_time": "2026-01-01 17:30:00"}}
+        ]
+        不要返回任何 Markdown 标记。
         """
         
         response = model.generate_content([prompt, img])
-        print(f"🤖 AI 原始返回内容: {response.text}")
-        
-        # 清洗并解析 JSON
         raw_text = response.text.strip().replace("```json", "").replace("```", "")
         analysis_results = json.loads(raw_text)
-        print(f"📦 解析后的 JSON: {analysis_results}")
-        
-        if not analysis_results:
-            print("📝 AI 未在图中发现股票信息")
-            return {"status": "success", "result": {}, "message": "No stocks found"}
 
-        # 存入数据库
-        for ticker, sentiment in analysis_results.items():
-            save_to_db(ticker, sentiment, "AI vision analysis")
+        # 遍历结果并入库
+        for item in analysis_results:
+            save_to_db(
+                ticker=item.get('ticker'),
+                sentiment=item.get('sentiment'),
+                author=item.get('author', 'Unknown'),
+                post_time=item.get('post_time', now_str), # 默认使用当前时间
+                reason="AI Vision Extraction"
+            )
         
-        return {"status": "success", "result": analysis_results}
+        return {"status": "success", "count": len(analysis_results), "data": analysis_results}
 
     except Exception as e:
-        import traceback
-        error_detail = traceback.format_exc()
-        print(f"🚨 运行异常详情:\n{error_detail}")
+        print(f"🚨 运行异常: {e}")
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
