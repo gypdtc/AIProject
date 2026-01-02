@@ -12,31 +12,43 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 def get_db_connection():
-    """手动解析 DATABASE_URL 以避开 psycopg2 的解析 Bug"""
     db_url = os.getenv("DATABASE_URL")
     
-    # 使用正则表达式提取：postgres://user:password@host:port/dbname
-    # 这种方式不会被密码中的 @ 或其他特殊符号干扰
-    regex = r"postgresql://(?P<user>.*?):(?P<password>.*?)@(?P<host>.*?):?(?P<port>\d+)?/(?P<dbname>.*)"
-    match = re.match(regex, db_url)
+    print(f"DEBUG: 原始 URL 长度: {len(db_url)}")
     
-    if not match:
-        raise Exception("无法解析 DATABASE_URL，请检查格式是否正确。")
+    # 彻底拆解 URL
+    import urllib.parse as urlparse
+    parsed = urlparse.urlparse(db_url)
     
-    params = match.groupdict()
-    
-    # 清理 dbname 中的查询参数（如 ?sslmode=require）
-    if "?" in params['dbname']:
-        params['dbname'] = params['dbname'].split("?")[0]
+    # 打印调试信息 (脱敏处理)
+    print(f"DEBUG: 解析出的 Host: {parsed.hostname}")
+    print(f"DEBUG: 解析出的 User: {parsed.username}")
+    print(f"DEBUG: 解析出的 DB Name: {parsed.path[1:]}")
+    if parsed.password:
+        # 只打印密码的前 3 位和后 3 位，确认是否被截断
+        masked_pwd = f"{parsed.password[:3]}***{parsed.password[-3:]}"
+        print(f"DEBUG: 密码脱敏预览: {masked_pwd}")
 
-    return psycopg2.connect(
-        database=params['dbname'],
-        user=params['user'],
-        password=params['password'],
-        host=params['host'],
-        port=params['port'] or 5432,
-        sslmode='require'
-    )
+    try:
+        # 使用显式参数连接
+        conn = psycopg2.connect(
+            database=parsed.path[1:].split('?')[0],
+            user=parsed.username,
+            password=parsed.password,
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            sslmode='require'
+        )
+        
+        # 强制设置 search_path
+        with conn.cursor() as cur:
+            cur.execute("SET search_path TO public;")
+            print("DEBUG: 已成功执行 SET search_path TO public")
+            
+        return conn
+    except Exception as e:
+        print(f"DEBUG: psycopg2.connect 内部报错详情: {str(e)}")
+        raise e
 
 def run_scanner():
     print("🚀 启动 Whale Flow 扫描协议 (6步过滤)...")
