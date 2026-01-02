@@ -14,6 +14,14 @@ provider "google" {
   credentials = file("service-account-key.json")
 }
 
+# --- 新增：定义 Docker 仓库 ---
+resource "google_artifact_registry_repository" "stock_repo" {
+  location      = "us-central1"
+  repository_id = "stock-scanner-repo"
+  description   = "Docker repository for AI Scanner"
+  format        = "DOCKER"
+}
+
 # 2. 修改为 Cloud Run Service
 resource "google_cloud_run_v2_service" "stock_service" {
   name     = "stock-scanner-service"
@@ -22,12 +30,12 @@ resource "google_cloud_run_v2_service" "stock_service" {
 
   template {
     containers {
-      # 临时改用这个，保证能创建成功
-      image = "us-docker.pkg.dev/cloudrun/container/hello"
-      #image = "us-central1-docker.pkg.dev/gen-lang-client-0486815668/stock-scanner-repo/app:latest"
+      # 保持使用 hello 镜像作为初始占位，直到 GitHub Actions 推送真正的镜像
+      image = "us-docker.pkg.dev/cloudrun/container/hello" 
+      
       env {
         name  = "DATABASE_URL"
-        value = "placeholder" # 部署时由 GitHub Actions 填充
+        value = "placeholder" 
       }
       env {
         name  = "GEMINI_API_KEY"
@@ -35,9 +43,12 @@ resource "google_cloud_run_v2_service" "stock_service" {
       }
     }
   }
+  
+  # 确保仓库先创建好
+  depends_on = [google_artifact_registry_repository.stock_repo]
 }
 
-# 3. 必须允许公开访问（以便插件调用）
+# 3. 允许公开访问
 resource "google_cloud_run_v2_service_iam_member" "noauth" {
   location = google_cloud_run_v2_service.stock_service.location
   name     = google_cloud_run_v2_service.stock_service.name
