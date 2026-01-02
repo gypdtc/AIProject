@@ -47,7 +47,26 @@ st.sidebar.success("✅ 数据库已连接")
 if st.sidebar.button('刷新数据'):
     st.rerun()
 
+# --- Reddit ---
+st.divider()
+st.header("🐋 Whale Flow 高质量期权异动 (6步量化协议)")
+st.caption("基于昨日收盘数据、20日均线趋势、IV估值及 Gemini 叙事检查")
+query_options = "SELECT * FROM option_trades ORDER BY final_score DESC LIMIT 5"
+df_options = get_data(query_options)
+
+if not df_options.empty:
+    for _, row in df_options.iterrows():
+        with st.expander(f"🎯 {row['ticker']} - 综合评分: {row['final_score']}"):
+            col1, col2, col3 = st.columns(3)
+            col1.metric("叙事类型", row['narrative_type'])
+            col2.metric("情感分", row['sentiment_score'])
+            col3.metric("盈亏比", f"{row['risk_reward_ratio']}x")
+            st.write(f"建议策略：买入代码 {row['ticker']}， strike 调整至当前价 2% 以内，到期日延长 14 天。")
+else:
+    st.info("尚未发现符合 6 步过滤协议的期权机会。")
+
 # --- 第一部分：今日热门股票统计 ---
+st.divider()
 st.header("🔥 今日社交媒体热门股票 Top 10")
 query1 = """
     SELECT ticker, COUNT(*) as mention_count,
