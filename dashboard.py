@@ -53,50 +53,68 @@ st.divider()
 st.set_page_config(page_title="AI 鲸鱼期权追踪", layout="wide")
 st.title("🐋 Whale Flow AI 智能期权看板")
 # 获取最近的建议
-df = get_data("SELECT * FROM option_trades ORDER BY created_at DESC LIMIT 10")
+df = get_data("SELECT * FROM option_trades WHERE created_at > NOW() - INTERVAL '7 days'")
+tickers = df['ticker'].unique()
 
-if not df.empty:
-    for index, row in df.iterrows():
-        # 根据方向显示不同颜色
-        color = "#2ecc71" if row['side'] == 'CALL' else "#e74c3c"
-        label = "📈 看涨 (CALL)" if row['side'] == 'CALL' else "📉 看跌 (PUT)"
+for ticker in tickers:
+    st.header(f"📊 策略聚合分析: {ticker}")
+    ticker_df = df[df['ticker'] == ticker]
+    
+    fig = go.Figure()
+    
+    for _, row in ticker_df.iterrows():
+        # 计算时间跨度：从生成日到行权日
+        start_date = row['created_at'].date()
+        end_date = row['expiration_date']
+        days_to_expiry = (end_date - start_date).days
         
-        with st.container():
-            st.markdown(f"---")
-            col1, col2 = st.columns([1, 2])
+        # 模拟每天的收益区间 (基于 2% 的平均日波动率)
+        dates = [start_date + timedelta(days=i) for i in range(days_to_expiry + 1)]
+        base_pnl = [] # 期望路径
+        high_pnl = [] # 理论最高
+        low_pnl = []  # 理论最低
+        
+        entry = float(row['entry_stock_price'])
+        side_mult = 1 if row['side'] == 'CALL' else -1
+        
+        for i in range(len(dates)):
+            # 随时间增加，波动范围呈平方根增长
+            vol_expansion = (i ** 0.5) * 0.02 
+            expected_move = i * 0.005 * side_mult # 假设每日 0.5% 的趋势
             
-            with col1:
-                st.subheader(f"{row['ticker']}")
-                st.markdown(f"<h3 style='color:{color};'>{label}</h3>", unsafe_allow_html=True)
-                st.write(f"**入场标价:** ${row['entry_stock_price']}")
-                st.write(f"**建议行权:** ${row['suggested_strike']}")
-                st.write(f"**评分:** {row['final_score']:.1f}/10")
-                st.info(f"**AI 叙事:**\n\n{row['narrative_type']}") # 自动换行
+            # 模拟期权杠杆后的收益 (%)
+            mid = expected_move * 10 * 100 
+            spread = vol_expansion * 10 * 100
+            
+            base_pnl.append(mid)
+            high_pnl.append(mid + spread)
+            low_pnl.append(mid - spread)
 
-            with col2:
-                # 绘制收益期望图
-                entry = float(row['entry_stock_price'])
-                # 模拟价格波动范围 -5% 到 +10%
-                x_prices = [entry * (1 + i/100) for i in range(-5, 11)]
-                # 简单的期权收益模拟公式 (杠杆约为 10 倍)
-                if row['side'] == 'CALL':
-                    y_pnl = [(max(p - entry, -entry*0.05)) * 10 for p in x_prices]
-                else:
-                    y_pnl = [(max(entry - p, -entry*0.05)) * 10 for p in x_prices]
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=x_prices, y=y_pnl, fill='tozeroy', 
-                                         line=dict(color=color), name="预期收益"))
-                fig.update_layout(
-                    title=f"{row['ticker']} 持有至明天的预期 P&L (%)",
-                    xaxis_title="标的价格 (Stock Price)",
-                    yaxis_title="预期盈亏 ($)",
-                    height=300,
-                    template="plotly_dark"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-else:
-    st.write("暂无扫描数据，请运行 Scanner Job。")
+        # 在同一个图表中添加多条建议曲线
+        label = f"建议 @ {start_date} ({row['side']} Strike: {row['suggested_strike']})"
+        
+        # 绘制最高/最低区间的阴影
+        fig.add_trace(go.Scatter(
+            x=dates + dates[::-1],
+            y=high_pnl + low_pnl[::-1],
+            fill='toself',
+            fillcolor='rgba(0,176,246,0.2)',
+            line_color='rgba(255,255,255,0)',
+            name=f"{label} 波动区间",
+        ))
+        
+        # 绘制主期望线
+        fig.add_trace(go.Scatter(x=dates, y=base_pnl, name=label, line=dict(width=3)))
+
+    fig.update_layout(
+        title=f"{ticker} 建议至行权日({end_date})的每日收益期望区间",
+        xaxis_title="日期",
+        yaxis_title="预期回报 (P&L %)",
+        template="plotly_dark",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("---")
 
 # --- 第一部分：今日热门股票统计 ---
 st.divider()

@@ -44,17 +44,15 @@ def run_scanner():
             # 这里的逻辑可以根据异动量筛选，这里为了演示保留逻辑
             # 调用 AI 进行方向和叙事判断
             prompt = f"""
-            分析股票 {ticker} 的近期趋势。当前价格 ${curr_price:.2f}。
-            请给出未来7天的操作建议：
-            1. 应该是看涨(CALL)还是看跌(PUT)?
-            2. 给出一个信心评分 (0-1.0)。
-            3. 详细解释原因（Narrative）。
-            请严格返回JSON格式，不要有其他文字：
-            {{"side": "CALL", "score": 0.85, "narrative": "这里写详细原因"}}
-            """
+分析 {ticker}。当前价 ${curr_price:.2f}。
+请返回 JSON，包含：
+1. "side": "CALL" 或 "PUT"
+2. "expiration": "YYYY-MM-DD" (建议行权日，通常选择下周五)
+3. "score": 信心评分
+4. "narrative": 理由
+"""
             response = model.generate_content(prompt)
-            clean_json = response.text.strip().replace('```json', '').replace('```', '')
-            ai_result = json.loads(clean_json)
+            ai_data = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
             
             # 记录数据
             final_trades.append({
@@ -79,10 +77,11 @@ def run_scanner():
             cur = conn.cursor()
             for t in final_trades:
                 cur.execute("""
-                    INSERT INTO public.option_trades 
-                    (ticker, side, sentiment_score, narrative_type, suggested_strike, entry_stock_price, final_score)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (t['ticker'], t['side'], t['sentiment'], t['narrative'], t['strike'], t['entry_price'], t['final_score']))
+    INSERT INTO public.option_trades 
+    (ticker, side, sentiment_score, narrative_type, suggested_strike, entry_stock_price, expiration_date)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+""", (ticker, ai_data['side'], ai_data['score'], ai_data['narrative'], 
+      curr_price * 1.02, curr_price, ai_data['expiration']))
             conn.commit()
             print(f"💰 成功入库 {len(final_trades)} 条建议。")
         except Exception as e:
