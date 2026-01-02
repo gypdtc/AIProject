@@ -3,6 +3,6 @@
   "name": "AI Stock Scanner",
   "version": "1.0",
   "permissions": ["activeTab", "storage"],
-  "host_permissions": ["https://你的-gcp-cloud-run-url/*"],
+  "host_permissions": ["https://stock-scanner-service-faxxxlu5da-uc.a.run.app/*"],
   "action": { "default_popup": "popup.html" }
 }
