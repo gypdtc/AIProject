@@ -1,5 +1,6 @@
 .env
 local.txt
+stock-ai-scanner-plugin/
 *.tfstate
 *.tfstate.backup
 .terraform/

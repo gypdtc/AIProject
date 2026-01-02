@@ -22,7 +22,7 @@ app.add_middleware(
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # 设置一个只有你插件知道的密钥
-INTERNAL_AUTH_KEY = "my_private_stock_key_2026" 
+INTERNAL_AUTH_KEY = os.getenv("INTERNAL_AUTH_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 # 使用 2.0 版本
