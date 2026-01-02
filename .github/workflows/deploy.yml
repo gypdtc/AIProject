@@ -1,4 +1,4 @@
-name: Deploy to Cloud Run Service
+name: Deploy Stock Scanner System
 
 on:
   push:
@@ -8,7 +8,10 @@ env:
   PROJECT_ID: gen-lang-client-0486815668 
   REGION: us-central1
   REPO_NAME: stock-scanner-repo
+  # 定义三个组件的名称
   SERVICE_NAME: stock-scanner-service
+  UI_SERVICE_NAME: stock-scanner-ui
+  JOB_NAME: stock-analyst-job
 
 jobs:
   deploy:
@@ -20,7 +23,6 @@ jobs:
     - name: Google Auth
       uses: google-github-actions/auth@v2
       with:
-        # 确保你在 GitHub Secrets 中存入了名为 GCP_SA_KEY 的 Service Account JSON
         credentials_json: ${{ secrets.GCP_SA_KEY }}
 
     - name: Set up Cloud SDK
@@ -32,18 +34,36 @@ jobs:
 
     - name: Build and Push Image
       run: |
-        # 使用 commit SHA 作为 tag，确保版本唯一，同时打上 latest 标签
-        docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} .
-        docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
+        IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app"
+        # 使用 commit SHA 作为版本标签
+        docker build -t $IMAGE_PATH:${{ github.sha }} .
+        docker tag $IMAGE_PATH:${{ github.sha }} $IMAGE_PATH:latest
         
-        # 额外推送一个 latest 标签，方便 Terraform 初始化使用
-        docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:latest
-        docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:latest
+        docker push $IMAGE_PATH:${{ github.sha }}
+        docker push $IMAGE_PATH:latest
 
-    - name: Deploy to Cloud Run Service
+    - name: Deploy API Service
       run: |
-        # 使用 update 命令将新镜像部署到现有 Service，并设置环境变量
+        # 更新主要的 FastAPI 后端
         gcloud run services update ${{ env.SERVICE_NAME }} \
           --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
           --region ${{ env.REGION }} \
           --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},INTERNAL_AUTH_KEY=${{ secrets.INTERNAL_AUTH_KEY }}"
+
+    - name: Deploy Streamlit UI
+      run: |
+        # 更新可视化看板服务
+        # 注意：这里需要覆盖启动命令来运行 streamlit
+        gcloud run services update ${{ env.UI_SERVICE_NAME }} \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
+          --region ${{ env.REGION }} \
+          --command "streamlit,run,dashboard.py,--server.port=8080,--server.address=0.0.0.0" \
+          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+
+    - name: Update Analyst Job
+      run: |
+        # 更新每日分析脚本的任务定义
+        gcloud run jobs update ${{ env.JOB_NAME }} \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
+          --region ${{ env.REGION }} \
+          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }}"

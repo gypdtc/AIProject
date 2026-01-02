@@ -69,7 +69,7 @@ resource "google_cloud_run_v2_job" "analyst_job" {
         command = ["python", "analyst_job.py"] 
         env {
           name  = "DATABASE_URL"
-          value = "你的_DATABASE_URL"
+          value = "placeholder"
         }
       }
     }
