@@ -30,7 +30,7 @@ async def analyze_route(request: Request):
         img = Image.open(io.BytesIO(image_bytes))
         
         # 2. 调用 Gemini 多模态模型
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = "分析这张截图中的股票讨论。提取 Ticker:Sentiment 格式。只返回 JSON，例如 {'AAPL': 'Bullish', 'TSLA': 'Bearish'}"
         response = model.generate_content([prompt, img])
         

@@ -1,13 +1,14 @@
-name: Deploy to Cloud Run
+name: Deploy to Cloud Run Service
 
 on:
   push:
     branches: [ "main" ]
 
 env:
-  PROJECT_ID: gen-lang-client-0486815668 # 必须修改
+  PROJECT_ID: gen-lang-client-0486815668 
   REGION: us-central1
   REPO_NAME: stock-scanner-repo
+  SERVICE_NAME: stock-scanner-service
 
 jobs:
   deploy:
@@ -19,20 +20,31 @@ jobs:
     - name: Google Auth
       uses: google-github-actions/auth@v2
       with:
+        # 确保你在 GitHub Secrets 中存入了名为 GCP_SA_KEY 的 Service Account JSON
         credentials_json: ${{ secrets.GCP_SA_KEY }}
 
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
 
-    - name: Build and Push Image
+    - name: Docker Auth
       run: |
         gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+    - name: Build and Push Image
+      run: |
+        # 使用 commit SHA 作为 tag，确保版本唯一，同时打上 latest 标签
         docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} .
         docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
+        
+        # 额外推送一个 latest 标签，方便 Terraform 初始化使用
+        docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:latest
+        docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:latest
 
-   - name: Deploy to Cloud Run Service
+    - name: Deploy to Cloud Run Service
       run: |
-        gcloud run services update stock-scanner-service \
-        --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
-        --region ${{ env.REGION }} \
-        --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+        # 使用 update 命令将新镜像部署到现有 Service，并设置环境变量
+        gcloud run services update ${{ env.SERVICE_NAME }} \
+          --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }} \
+          --region ${{ env.REGION }} \
+          --set-env-vars "DATABASE_URL=${{ secrets.DATABASE_URL }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+          --allow-unauthenticated
