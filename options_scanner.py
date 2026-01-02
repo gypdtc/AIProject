@@ -1,93 +1,67 @@
 import os
-import yfinance as yf
 import google.generativeai as genai
 import psycopg2
 import json
 import urllib.parse as urlparse
 
-# 1. 基础配置
-DATABASE_URL = os.getenv("DATABASE_URL")
+# 1. 配置 Gemini 2.5 Flash 及其搜索工具
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash')
 
-def get_db_connection():
-    parsed = urlparse.urlparse(DATABASE_URL)
-    conn = psycopg2.connect(
-        database=parsed.path[1:].split('?')[0],
-        user=parsed.username,
-        password=parsed.password,
-        host=parsed.hostname,
-        port=parsed.port or 5432,
-        sslmode='require'
-    )
-    with conn.cursor() as cur:
-        cur.execute("SET search_path TO public;")
-    return conn
+# 启用 Google Search 实时工具，这是让 AI "睁眼看世界" 的核心
+model = genai.GenerativeModel(
+    model_name='gemini-2.5-flash',
+    tools=[{"google_search": {}}] 
+)
 
-def run_scanner():
-    print("🚀 启动 Whale Flow 增强版扫描协议...")
-    watchlist = ["NVDA", "TSLA", "AAPL", "AMD", "MSFT", "META", "GOOGL", "NFLX", "COIN", "MARA"]
-    final_trades = []
+def run_ai_agent_scanner():
+    print("🤖 AI 代理启动：正在全网扫描 Whale Flow (执行 6 步协议)...")
+    
+    # 你的核心 Prompt：直接将 6 步量化协议作为 AI 指令
+    prompt = """
+    请作为一名高级期权量化交易员，利用实时搜索功能，严格执行以下 6 步筛选协议，找出今日（2026年1月2日）美股最强信号：
 
-    for ticker in watchlist:
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
-            if hist.empty: continue
-            curr_price = float(hist['Close'].iloc[-1])
-            
-            # Step 1: 扫描期权链
-            expirations = stock.options
-            if not expirations: continue
-            opts = stock.option_chain(expirations[0])
-            
-            # 这里的逻辑可以根据异动量筛选，这里为了演示保留逻辑
-            # 调用 AI 进行方向和叙事判断
-            prompt = f"""
-分析 {ticker}。当前价 ${curr_price:.2f}。
-请返回 JSON，包含：
-1. "side": "CALL" 或 "PUT"
-2. "expiration": "YYYY-MM-DD" (建议行权日，通常选择下周五)
-3. "score": 信心评分
-4. "narrative": 理由
-"""
-            response = model.generate_content(prompt)
-            ai_data = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
-            
-            # 记录数据
-            final_trades.append({
-                "ticker": ticker,
-                "side": ai_result.get('side', 'CALL'),
-                "sentiment": float(ai_result.get('score', 0.5)),
-                "narrative": str(ai_result.get('narrative', '')),
-                "strike": float(curr_price * (1.02 if ai_result.get('side') == 'CALL' else 0.98)),
-                "entry_price": curr_price,
-                "final_score": float(ai_result.get('score', 0.5) * 10)
-            })
-            print(f"✅ 已分析 {ticker}: {ai_result.get('side')}")
+    Step 1: 扫描全市场单笔溢价 > $50k、90天内到期的期权流，识别标的和方向。
+    Step 2: 对这些标的进行趋势对齐，仅保留 Call 远超 Put 且价格在 20日均线 (SMA) 之上的标的。
+    Step 3: 检查 IV Rank，剔除 IVR > 70 的昂贵标的，仅保留估值合理的合约。
+    Step 4: 叙事核查。搜索未来 7 天内是否有财报或负面新闻，给出情绪评分 (-1 到 1) 和 Narrative Type。
+    Step 5: 结构优化 (Breathing Room)。行权价调整至市价 2% 以内，到期日延长 14 天。
+    Step 6: 数学评分。计算 Risk/Reward 比例，仅保留比值 > 2 的交易。
 
-        except Exception as e:
-            print(f"⚠️ {ticker} 异常: {e}")
+    请严格返回符合条件的 Top 5 交易，输出必须是纯 JSON 数组格式，禁止任何解释文字：
+    [{"ticker": "NVDA", "side": "CALL", "score": 0.85, "narrative": "AI需求超预期", "strike": 145.0, "expiration": "2026-02-15", "entry_price": 140.0, "rr": 2.5, "final_score": 8.5}]
+    """
 
-    # 写入数据库
-    if final_trades:
-        conn = None
-        try:
-            conn = get_db_connection()
+    try:
+        # AI 进行思考和搜索
+        response = model.generate_content(prompt)
+        
+        # 清理响应内容并解析 JSON
+        raw_text = response.text.strip().replace('```json', '').replace('```', '')
+        final_trades = json.loads(raw_text)
+        
+        if final_trades:
+            # 数据库连接逻辑（保持你原来的参数化连接方式以解决 np 报错）
+            url = urlparse.urlparse(os.getenv("DATABASE_URL"))
+            conn = psycopg2.connect(
+                database=url.path[1:], user=url.username, password=url.password,
+                host=url.hostname, port=url.port, sslmode='require'
+            )
             cur = conn.cursor()
+            
             for t in final_trades:
                 cur.execute("""
-    INSERT INTO public.option_trades 
-    (ticker, side, sentiment_score, narrative_type, suggested_strike, entry_stock_price, expiration_date)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-""", (ticker, ai_data['side'], ai_data['score'], ai_data['narrative'], 
-      curr_price * 1.02, curr_price, ai_data['expiration']))
+                    INSERT INTO public.option_trades 
+                    (ticker, side, sentiment_score, narrative_type, suggested_strike, entry_stock_price, expiration_date, risk_reward_ratio, final_score)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (t['ticker'], t['side'], t['score'], t['narrative'], t['strike'], t['entry_price'], t['expiration'], t['rr'], t['final_score']))
+            
             conn.commit()
-            print(f"💰 成功入库 {len(final_trades)} 条建议。")
-        except Exception as e:
-            print(f"❌ 写入失败: {e}")
-        finally:
-            if conn: conn.close()
+            print(f"✅ AI 代理完成，成功入库 {len(final_trades)} 条深度筛选出的机会。")
+            cur.close()
+            conn.close()
+            
+    except Exception as e:
+        print(f"❌ AI 扫描或入库失败: {e}")
 
 if __name__ == "__main__":
-    run_scanner()
+    run_ai_agent_scanner()
