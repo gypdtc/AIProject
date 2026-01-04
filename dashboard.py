@@ -149,7 +149,7 @@ if not df_trades.empty:
                     hovermode="x unified",
                     yaxis_title="预期回报 (P&L %)"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key=f"chart_{ticker}")
 
             with col_info:
                 latest = ticker_df.iloc[0]
