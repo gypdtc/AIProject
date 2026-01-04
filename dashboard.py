@@ -77,6 +77,25 @@ if latest_ts:
 else:
     st.info("等待首次扫描数据入库...")
 
+# 在 dashboard.py 找到高 IV 预警板块后的位置插入：
+
+# --- 新增：CSP 卖出建议展示 ---
+st.subheader("💰 波动率收割：卖出看跌 (CSP) 机会")
+st.markdown("> **策略逻辑**：针对上方高 IV 标的，卖出深度价外 (OTM) Put。若股价不动或小跌，收割权利金；若大跌，则以折扣价接盘。")
+
+if latest_ts:
+    csp_query = f"SELECT * FROM public.csp_suggestions WHERE scan_timestamp = '{latest_ts}' ORDER BY iv_level DESC"
+    csp_df = get_data(csp_query)
+    
+    if not csp_df.empty:
+        # 格式化展示
+        display_df = csp_df[['ticker', 'current_price', 'suggested_strike', 'safety_buffer', 'iv_level', 'analysis_logic']].copy()
+        display_df.columns = ['标的', '现价', '建议行权价', '安全垫', 'IV 水平', 'AI 逻辑分析']
+        display_df['IV 水平'] = display_df['IV 水平'].apply(lambda x: f"{float(x):.1%}")
+        
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("当前扫描批次暂无 CSP 建议。")
 st.divider()
 
 # --- C. 6步协议策略聚合分析 (带动态回测曲线) ---
