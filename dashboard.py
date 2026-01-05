@@ -38,18 +38,18 @@ def get_data(query):
     conn.close()
     return df
 
-# --- 3. Core Data Locking & Timezone Handling ---
+# --- 3. Core Data Locking & Timezone Handling (PDT) ---
 try:
-    # Get raw timestamp (usually UTC from DB)
+    # Get raw timestamp (UTC from DB)
     last_scan_query = "SELECT MAX(scan_timestamp) FROM public.iv_analysis"
     latest_ts_utc = get_data(last_scan_query).iloc[0, 0]
     
-    # Convert to Beijing Time (CST)
-    local_tz = pytz.timezone("Asia/Shanghai")
+    # Convert to Pacific Time (Handles PDT/PST automatically)
+    local_tz = pytz.timezone("America/Los_Angeles")
     if latest_ts_utc.tzinfo is None:
         latest_ts_utc = pytz.utc.localize(latest_ts_utc)
-    latest_ts_cst = latest_ts_utc.astimezone(local_tz)
-    ts_display = latest_ts_cst.strftime('%Y-%m-%d %H:%M:%S %Z')
+    latest_ts_pdt = latest_ts_utc.astimezone(local_tz)
+    ts_display = latest_ts_pdt.strftime('%Y-%m-%d %H:%M:%S %Z')
 except:
     latest_ts_utc = None
     ts_display = "N/A"
@@ -61,7 +61,7 @@ st.title("🐋 Whale Flow AI 智能期权看板")
 st.sidebar.header("系统状态")
 st.sidebar.success("✅ 数据库已连接")
 if latest_ts_utc:
-    st.sidebar.markdown(f"⏱️ **最新扫描快照 (CST):** \n`{ts_display}`")
+    st.sidebar.markdown(f"⏱️ **最新扫描快照 (PDT):** \n`{ts_display}`")
 
 if st.sidebar.button('手动刷新页面'):
     st.rerun()
@@ -69,7 +69,6 @@ if st.sidebar.button('手动刷新页面'):
 # --- B. High IV Alerts (Dynamic Selection) ---
 st.subheader("🔥 异常波动预警 (AI 深度分析)")
 
-# Dynamic Selector for Display Count
 display_count = st.selectbox(
     "选择展示标的数量:",
     options=[5, 10, 20, 30],
@@ -100,14 +99,12 @@ if latest_ts_utc:
                         st.error(f"**{row['ticker']}**")
                         st.metric(label="隐含波动率", value=f"{float(row['iv_value']):.1%}")
                         
-                        # Market Metrics
                         price = row['current_price'] if row['current_price'] else 0
                         mkt_cap = (float(row['market_cap']) / 1e9) if row['market_cap'] else 0
                         st.caption(f"💰 现价: `${price:.2f}`")
                         st.caption(f"🏢 市值: `{mkt_cap:.2f}B`")
                         
                         with st.expander("AI 原因分析 (中文)"):
-                            # Logic assumes your Scanner prompt now requests Chinese
                             st.write(row['analysis_reason'])
     else:
         st.info("当前批次暂无 IV 数据。")
@@ -119,13 +116,16 @@ st.subheader("💰 波动率收割：卖出看跌 (CSP) 机会")
 st.markdown("> **策略逻辑**：针对高 IV 标的卖出深度价外 (OTM) Put。若股价横盘或小跌则收割权利金。")
 
 if latest_ts_utc:
-    csp_query = f"SELECT * FROM public.csp_suggestions WHERE scan_timestamp = '{latest_ts_utc}' ORDER BY iv_level DESC"
+    # Added expiration_date to the query
+    csp_query = f"SELECT ticker, current_price, suggested_strike, expiration_date, safety_buffer, iv_level, analysis_logic FROM public.csp_suggestions WHERE scan_timestamp = '{latest_ts_utc}' ORDER BY iv_level DESC"
     csp_df = get_data(csp_query)
     
     if not csp_df.empty:
-        display_df = csp_df[['ticker', 'current_price', 'suggested_strike', 'safety_buffer', 'iv_level', 'analysis_logic']].copy()
-        display_df.columns = ['标的', '现价', '建议行权价', '安全垫', 'IV 水平', 'AI 逻辑分析']
+        display_df = csp_df.copy()
+        display_df.columns = ['标的', '现价', '建议行权价', '到期日', '安全垫', 'IV 水平', '卖出风险评估 (中文)']
         display_df['IV 水平'] = display_df['IV 水平'].apply(lambda x: f"{float(x):.1%}")
+        # Formatting expiration date
+        display_df['到期日'] = pd.to_datetime(display_df['到期日']).dt.date
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("当前暂无 CSP 建议。")
@@ -182,9 +182,8 @@ if not df_trades.empty:
                 st.info(f"**AI 叙事 (中文):**\n\n{latest_row['narrative_type']}")
             st.divider()
 
-# --- E. Sentiment & Leaderboard (Remaining original sections) ---
+# --- E. Sentiment & Leaderboard ---
 st.header("🔥 今日社交媒体热门股票 Top 10")
-# ... [Original Sentiment Bars/Leaderboard Code remains same as provided in your snippet] ...
 query_heat = """
     SELECT ticker, COUNT(*) as mention_count,
            COUNT(*) FILTER (WHERE sentiment = 'Bullish') as bullish_count,
@@ -197,19 +196,19 @@ df_stocks = get_data(query_heat)
 if not df_stocks.empty:
     c1, c2 = st.columns(2)
     with c1:
-        st.plotly_chart(px.bar(df_stocks, x='ticker', y='mention_count', template="plotly_dark"), use_container_width=True)
+        st.plotly_chart(px.bar(df_stocks, x='ticker', y='mention_count', title="讨论热度", template="plotly_dark"), use_container_width=True)
     with c2:
-        df_m = df_stocks.melt(id_vars='ticker', value_vars=['bullish_count', 'bearish_count'])
-        st.plotly_chart(px.bar(df_m, x='ticker', y='value', color='variable', barmode='group', template="plotly_dark"), use_container_width=True)
+        df_m = df_stocks.melt(id_vars='ticker', value_vars=['bullish_count', 'bearish_count'], var_name='Sentiment', value_name='Count')
+        st.plotly_chart(px.bar(df_m, x='ticker', y='Count', color='Sentiment', barmode='group', title="看涨 vs 看跌", template="plotly_dark"), use_container_width=True)
 
 st.header("🏆 “民间股神”预测准确率排名")
-# ... [Original Table Code] ...
 try:
     df_authors = get_data("SELECT author, total_predictions, correct_predictions, accuracy_rate FROM author_performance WHERE total_predictions > 0 ORDER BY accuracy_rate DESC LIMIT 10")
     if not df_authors.empty:
         df_authors['accuracy_rate'] = df_authors['accuracy_rate'].apply(lambda x: f"{x:.2f}%")
         st.table(df_authors)
-except: st.info("Leaderboard data loading...")
+except: 
+    st.info("Leaderboard data loading...")
 
 with st.expander("📂 查看原始数据流水线 (最新 20 条)"):
     st.dataframe(get_data("SELECT ticker, sentiment, author, created_at FROM stock_trends ORDER BY created_at DESC LIMIT 20"), use_container_width=True)
